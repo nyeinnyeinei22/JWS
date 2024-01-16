@@ -1,5 +1,7 @@
 package com.thitsaworks.mojaloop.thitsaconnect.JwsGeneratingAndVerifying;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Component;
 
 import java.io.FileReader;
@@ -14,6 +16,9 @@ import java.util.Base64;
 
 @Component
 public class RSAKeyProvider {
+
+    @Autowired
+    private ResourceLoader resourceLoader;
 
     public static PublicKey getPublicKeyRsa(String sKeyID) throws NoSuchAlgorithmException, InvalidKeySpecException {
 //        //TODO : Replace your public key here
@@ -54,6 +59,23 @@ public class RSAKeyProvider {
 
     public PublicKey readX509PublicKey(String publicKeyPath) throws Exception {
 
+//        Resource resource = new ClassPathResource("data/" + publicKeyPath);
+//        File file = resource.getFile();
+
+        //File file = ResourceUtils.getFile("classpath:" + publicKeyPath);
+
+//        ClassLoader classLoader = getClass().getClassLoader();
+//        var url = classLoader.getResource(publicKeyPath).getPath();
+
+        //Path path = Paths.get(getClass().getClassLoader().getResource(publicKeyPath).toURI());
+
+        //Resource resource = resourceLoader.getResource("classpath:" + publicKeyPath);
+
+        //Resource resource = new ClassPathResource("/data/" + publicKeyPath, this.getClass().getClassLoader());
+
+        var resource = RSAKeyProvider.class.getClassLoader().getResourceAsStream(publicKeyPath);
+        System.out.println(resource);
+
         try (FileReader keyReader = new FileReader(publicKeyPath)) {
             StringBuilder keyPem = new StringBuilder();
             int ch;
@@ -79,6 +101,25 @@ public class RSAKeyProvider {
     public PrivateKey readPKCS8PrivateKey(String privateKeyPath) throws Exception {
 
         java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+
+//        Resource resource = new ClassPathResource("data/" + privateKeyPath);
+//        File file = resource.getFile();
+
+//        ClassLoader classLoader = getClass().getClassLoader();
+//        var url = classLoader.getResource(privateKeyPath).getPath();
+
+        // File file = ResourceUtils.getFile("classpath:" + privateKeyPath);
+
+        // Path path = Paths.get(getClass().getClassLoader().getResource(privateKeyPath).toURI());
+
+        //Resource resource = resourceLoader.getResource("classpath:" + privateKeyPath);
+        // Resource resource = new ClassPathResource(privateKeyPath);
+
+        // Resource resource = new ClassPathResource("/data/" + privateKeyPath, this.getClass().getClassLoader());
+
+        var resource = RSAKeyProvider.class.getClassLoader().getResourceAsStream(privateKeyPath);
+        System.out.println(resource);
+
         try (FileReader keyReader = new FileReader(privateKeyPath)) {
             StringBuilder keyPem = new StringBuilder();
             int ch;

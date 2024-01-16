@@ -1,7 +1,8 @@
 package com.thitsaworks.mojaloop.thitsaconnect.JwsGeneratingAndVerifying;
 
-import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,7 @@ import java.security.PublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.Base64;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Logger;
@@ -37,13 +39,15 @@ public class GetSignature {
 
     private static final Base64.Decoder base64Decoder = Base64.getDecoder();
 
+    public static final long JWT_TOKEN_VALIDITY = 5 * 60 * 60;
+
     public String getSignature(Map<String, String> requestOptions)
             throws Exception {
 
         PublicKey publicKey = rsaKeyProvider.readX509PublicKey(
-                "C:\\NNEWORKING\\Mojaloop\\sdk-standard-components\\test\\unit\\data\\jwsValidationKey.pem"); //rsaKeyProvider.getPublicKeyRsa(secret);
+                "jwsValidationKey.pem"); //C:\\NNEWORKING\\Mojaloop\\sdk-standard-components\\test\\unit\\data\\jwsValidationKey.pem"
         PrivateKey privateKey = rsaKeyProvider.readPKCS8PrivateKey(
-                "C:\\NNEWORKING\\Mojaloop\\sdk-standard-components\\test\\unit\\data\\jwsSigningKey.pem");//rsaKeyProvider.getPrivateKeyRsa(secret);
+                "jwsSigningKey.pem"); //C:\\NNEWORKING\\Mojaloop\\sdk-standard-components\\test\\unit\\data\\jwsSigningKey.pem
         Algorithm signingKey =
                 Algorithm.RSA256((RSAPublicKey) publicKey, (RSAPrivateKey) privateKey); //HMAC256(secret);
 
@@ -67,7 +71,7 @@ public class GetSignature {
         protectedHeaderObject.put("FSPIOP-HTTP-Method",
                 requestOptions.get("FSPIOP-HTTP-Method").toString().toUpperCase());
         protectedHeaderObject.put("FSPIOP-Source", requestOptions.get("FSPIOP-Source"));
-        protectedHeaderObject.put("kid", secret);
+        //protectedHeaderObject.put("kid", secret);
 
         // set destination in the protected header object if it is present in the request headers
         if (requestOptions.get("FSPIOP-Destination") != null) {
@@ -86,7 +90,14 @@ public class GetSignature {
         }
 
         // now we sign
-        String token = JWT.create().withHeader(protectedHeaderObject).withPayload(claims).sign(signingKey);
+        //String token = JWT.create().withHeader(protectedHeaderObject).withPayload(claims).sign(signingKey);
+
+        String token = Jwts.builder().setClaims(claims)
+                           .setSubject(protectedHeaderObject.toString())
+                           .setIssuedAt(new Date(System.currentTimeMillis()))
+                           .setExpiration(new Date(System.currentTimeMillis() + JWT_TOKEN_VALIDITY * 1000))
+                           .signWith(SignatureAlgorithm.RS256, privateKey)
+                           .compact();
 
         // now set the signature header as JSON encoding of the signature and protected header as per mojaloop spec
         String[] parts = token.split("\\.");
