@@ -4,7 +4,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Component;
 
-import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
@@ -59,27 +62,15 @@ public class RSAKeyProvider {
 
     public PublicKey readX509PublicKey(String publicKeyPath) throws Exception {
 
-//        Resource resource = new ClassPathResource("data/" + publicKeyPath);
-//        File file = resource.getFile();
+        try (InputStream inputStream = getClass().getResourceAsStream("/" + publicKeyPath)) {
+            if (inputStream == null) {
+                throw new IOException("File not found: " + publicKeyPath);
+            }
 
-        //File file = ResourceUtils.getFile("classpath:" + publicKeyPath);
-
-//        ClassLoader classLoader = getClass().getClassLoader();
-//        var url = classLoader.getResource(publicKeyPath).getPath();
-
-        //Path path = Paths.get(getClass().getClassLoader().getResource(publicKeyPath).toURI());
-
-        //Resource resource = resourceLoader.getResource("classpath:" + publicKeyPath);
-
-        //Resource resource = new ClassPathResource("/data/" + publicKeyPath, this.getClass().getClassLoader());
-
-        var resource = RSAKeyProvider.class.getClassLoader().getResourceAsStream(publicKeyPath);
-        System.out.println(resource);
-
-        try (FileReader keyReader = new FileReader(publicKeyPath)) {
+            InputStreamReader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
             StringBuilder keyPem = new StringBuilder();
             int ch;
-            while ((ch = keyReader.read()) != -1) {
+            while ((ch = reader.read()) != -1) {
                 keyPem.append((char) ch);
             }
 
@@ -102,28 +93,16 @@ public class RSAKeyProvider {
 
         java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
 
-//        Resource resource = new ClassPathResource("data/" + privateKeyPath);
-//        File file = resource.getFile();
+        try (InputStream inputStream = getClass().getResourceAsStream("/" + privateKeyPath)) {
 
-//        ClassLoader classLoader = getClass().getClassLoader();
-//        var url = classLoader.getResource(privateKeyPath).getPath();
+            if (inputStream == null) {
+                throw new IOException("File not found: " + privateKeyPath);
+            }
 
-        // File file = ResourceUtils.getFile("classpath:" + privateKeyPath);
-
-        // Path path = Paths.get(getClass().getClassLoader().getResource(privateKeyPath).toURI());
-
-        //Resource resource = resourceLoader.getResource("classpath:" + privateKeyPath);
-        // Resource resource = new ClassPathResource(privateKeyPath);
-
-        // Resource resource = new ClassPathResource("/data/" + privateKeyPath, this.getClass().getClassLoader());
-
-        var resource = RSAKeyProvider.class.getClassLoader().getResourceAsStream(privateKeyPath);
-        System.out.println(resource);
-
-        try (FileReader keyReader = new FileReader(privateKeyPath)) {
+            InputStreamReader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
             StringBuilder keyPem = new StringBuilder();
             int ch;
-            while ((ch = keyReader.read()) != -1) {
+            while ((ch = reader.read()) != -1) {
                 keyPem.append((char) ch);
             }
 

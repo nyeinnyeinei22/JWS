@@ -1,6 +1,7 @@
 package com.thitsaworks.mojaloop.thitsaconnect.JwsGeneratingAndVerifying;
 
 import com.auth0.jwt.algorithms.Algorithm;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,7 +13,6 @@ import java.security.PublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.Base64;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Logger;
@@ -52,6 +52,9 @@ public class GetSignature {
                 Algorithm.RSA256((RSAPublicKey) publicKey, (RSAPrivateKey) privateKey); //HMAC256(secret);
 
         logger.info(String.format("Get JWS Signature: %s", requestOptions));
+
+        logger.info(String.format("Public Key : %s", publicKey.toString()));
+
         String payload = requestOptions.get("body") != null ? requestOptions.get("body") : requestOptions.get("data");
         String uri = requestOptions.get("uri") != null ? requestOptions.get("uri") : requestOptions.get("url");
 
@@ -71,7 +74,7 @@ public class GetSignature {
         protectedHeaderObject.put("FSPIOP-HTTP-Method",
                 requestOptions.get("FSPIOP-HTTP-Method").toString().toUpperCase());
         protectedHeaderObject.put("FSPIOP-Source", requestOptions.get("FSPIOP-Source"));
-        //protectedHeaderObject.put("kid", secret);
+        //protectedHeaderObject.put("kid", publicKey.toString());
 
         // set destination in the protected header object if it is present in the request headers
         if (requestOptions.get("FSPIOP-Destination") != null) {
@@ -93,9 +96,7 @@ public class GetSignature {
         //String token = JWT.create().withHeader(protectedHeaderObject).withPayload(claims).sign(signingKey);
 
         String token = Jwts.builder().setClaims(claims)
-                           .setSubject(protectedHeaderObject.toString())
-                           .setIssuedAt(new Date(System.currentTimeMillis()))
-                           .setExpiration(new Date(System.currentTimeMillis() + JWT_TOKEN_VALIDITY * 1000))
+                           .setHeader(protectedHeaderObject)
                            .signWith(SignatureAlgorithm.RS256, privateKey)
                            .compact();
 
@@ -109,7 +110,10 @@ public class GetSignature {
         signatureObject.put("protectedHeader", protectedHeaderBase64.replace("\"", ""));
         signatureObject.put("token", token);
 
-        return signatureObject.toString();
+        ObjectMapper objectMapper = new ObjectMapper();
+        String jsonToken = objectMapper.writeValueAsString(signatureObject);
+
+        return token;
     }
 
 }

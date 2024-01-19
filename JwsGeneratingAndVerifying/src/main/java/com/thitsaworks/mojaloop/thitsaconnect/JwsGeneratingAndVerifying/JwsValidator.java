@@ -1,145 +1,138 @@
 package com.thitsaworks.mojaloop.thitsaconnect.JwsGeneratingAndVerifying;
 
-import io.jsonwebtoken.JwsHeader;
-import io.jsonwebtoken.JwtException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
-import java.util.Base64;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.logging.Logger;
+import java.util.logging.Level;
+import java.util.Base64;
 
-@Component
+import com.nimbusds.jose.shaded.gson.Gson;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.Claims;
+
+/**
+ * Provides methods for Mojaloop compliant JWS signing and signature verification
+ */
 public class JwsValidator {
-
-    private static final Logger logger = LoggerFactory.getLogger(JwsValidatorOld.class);
+    private Logger logger;
+    private Map<String, String> validationKeys;
     private static final String SIGNATURE_ALGORITHM = "RS256";
 
-    private final Map<String, String> validationKeys;
-
     public JwsValidator(Map<String, String> validationKeys) {
+        this.logger = Logger.getLogger(JwsValidator.class.getName());
+        if(validationKeys == null) {
+            throw new IllegalArgumentException("Validation keys must be supplied as config argument");
+        }
         this.validationKeys = validationKeys;
     }
 
-    public void validate(Request request) {
+    /**
+     * Validates the JWS headers on an incoming HTTP request
+     * Throws if the protected header or signature are not valid
+     */
+    public void validate(Map<String, String> headers, String body, String data) {
         try {
-            Map<String, String> headers = request.getHeaders();
-            String payload = request.getBody() != null ? request.getBody() : request.getData().toString();
-
-            logger.info("Validating JWS on request with headers: " + headers + " and body: " + payload);
-
-            if (payload == null) {
+            String payload = body != null ? body : data;
+            logger.log(Level.INFO, "Validing JWS on request with headers: {0} and body: {1}", new Object[]{headers, payload});
+            if(payload == null) {
                 throw new IllegalArgumentException("Cannot validate JWS without a body");
             }
-
-            // First check if we have a public (validation) key for the request source
-            String fspiopSourceHeader = headers.get("fspiop-source");
-            if (fspiopSourceHeader == null) {
+            // first check we have a public (validation) key for the request source
+            if(!headers.containsKey("fspiop-source")) {
                 throw new IllegalArgumentException("FSPIOP-Source HTTP header not in request headers. Unable to verify JWS");
             }
-
-            String pubKey = validationKeys.get(fspiopSourceHeader);
-            if (pubKey == null) {
-                throw new IllegalArgumentException("JWS public key for '" + fspiopSourceHeader + "' not available. Unable to verify JWS. Only have keys for: " + validationKeys.keySet());
+            String pubKey = this.validationKeys.get(headers.get("fspiop-source"));
+            if(pubKey == null) {
+                throw new IllegalArgumentException("JWS public key for '" + headers.get("fspiop-source") + "' not available. Unable to verify JWS. Only have keys for: " + this.validationKeys.keySet());
             }
-
-            // Next, we check if the required headers are present
-            if (!headers.containsKey("fspiop-uri") || !headers.containsKey("fspiop-http-method") || !headers.containsKey("fspiop-signature")) {
-                throw new IllegalArgumentException("fspiop-uri, fspiop-http-method, and fspiop-signature HTTP headers are all required for JWS. Only got " + headers);
+            // first we check the required headers are present
+            if(!headers.containsKey("fspiop-uri") || !headers.containsKey("fspiop-http-method") || !headers.containsKey("fspiop-signature")) {
+                throw new IllegalArgumentException("fspiop-uri, fspiop-http-method and fspiop-signature HTTP headers are all required for JWS. Only got " + headers);
             }
-
-            // If all required headers are present, we extract the components of the signature header
+            // if all required headers are present we start by extracting the components of the signature header
             String signatureHeader = headers.get("fspiop-signature");
-            SignatureData signatureData = parseSignatureHeader(signatureHeader);
-
-            String token = signatureData.protectedHeader + "." + Base64.getUrlEncoder().encodeToString(payload.getBytes()) + "." + signatureData.signature;
-
-//            PublicKey publicKey = Keys.publicKeyFromPem(pubKey);
-//
-//            // Validate the signature
-//            JwsHeader<?> header = Jwts.parserBuilder()
-//                    .setSigningKey(publicKey)
-//                    .requireAlgorithm(SIGNATURE_ALGORITHM)
-//                    .build()
-//                    .parse(token)
-//                    .getHeader();
-//
-//            // Check protected header against the actual request headers
-//            validateProtectedHeader(headers, header);
-
-            logger.info("JWS validation successful for request " + request);
-
-        } catch (JwtException ex) {
-            //| SignatureException | InvalidKeyException | NoSuchAlgorithmException
-            logger.error("Error validating JWS: " + ex.getMessage(), ex);
-            throw new RuntimeException(ex);
+            Map<String, Object> signatureHeaderMap = new HashMap<>();
+            signatureHeaderMap = (Map<String, Object>) new Gson().fromJson(signatureHeader, signatureHeaderMap.getClass());
+            String protectedHeader = (String) signatureHeaderMap.get("protectedHeader");
+            String signature = (String) signatureHeaderMap.get("signature");
+            String token = protectedHeader + "." + Base64.getEncoder().encodeToString(payload.getBytes()) + "." + signature;
+            // validate signature
+            Claims result = Jwts.parser()
+                                .setSigningKey(pubKey)
+                                .require(SIGNATURE_ALGORITHM, true)
+                                .parseClaimsJws(token)
+                                .getBody();
+            // check protected header has all required fields and matches actual incoming headers
+            this._validateProtectedHeader(headers, result);
+            logger.log(Level.INFO, "JWS verify result: {0}", result);
+            // all ok if we got here
+          //  logger.log(Level.INFO, "JWS valid for request {0}", request);
+        }
+        catch(Exception e) {
+            logger.log(Level.SEVERE, "Error validating JWS: {0}", e.getMessage());
+            throw e;
         }
     }
 
-    private SignatureData parseSignatureHeader(String signatureHeader) {
-        // Parse the JSON signature header
-        // Replace double quotes to parse as JSON object
-        signatureHeader = signatureHeader.replace("\"", "");
-        String[] parts = signatureHeader.split("\\.");
-
-        if (parts.length != 2) {
-            throw new IllegalArgumentException("Invalid JWS signature header format");
+    /**
+     * Validates the protected header and checks it against the actual request headers.
+     * Throws an exception if a discrepancy is detected or validation fails.
+     */
+    private void _validateProtectedHeader(Map<String, String> headers, Claims decodedProtectedHeader) {
+        // check alg is present and is the single permitted value
+        if(!decodedProtectedHeader.containsKey("alg")) {
+            throw new IllegalArgumentException("Decoded protected header does not contain required alg element: " + decodedProtectedHeader);
         }
-
-        return new SignatureData(parts[0], parts[1]);
-    }
-
-    private void validateProtectedHeader(Map<String, String> headers, JwsHeader<?> header) {
-        // Check alg is present and is the single permitted value
-        if (!SIGNATURE_ALGORITHM.equals(header.getAlgorithm())) {
-            throw new IllegalArgumentException("Invalid protected header alg '" + header.getAlgorithm() + "', should be '" + SIGNATURE_ALGORITHM + "'");
+        if(!decodedProtectedHeader.get("alg").equals(SIGNATURE_ALGORITHM)) {
+            throw new IllegalArgumentException("Invalid protected header alg '" + decodedProtectedHeader.get("alg") + "' should be '" + SIGNATURE_ALGORITHM + "'");
         }
-
-        // Check FSPIOP-URI is present and matches
-        validateHeaderValue("FSPIOP-URI", headers.get("fspiop-uri"), (String) header.get("FSPIOP-URI"));
-
-        // Check FSPIOP-HTTP-Method is present and matches
-        validateHeaderValue("FSPIOP-HTTP-Method", headers.get("fspiop-http-method"), (String) header.get("FSPIOP-HTTP-Method"));
-
-        // Check FSPIOP-Source is present and matches
-        validateHeaderValue("FSPIOP-Source", headers.get("fspiop-source"), (String) header.get("FSPIOP-Source"));
-
-        // If we have a Date field in the protected header, it must be present in the HTTP header and the values should match exactly
-        String dateHeaderValue = headers.get("date");
-        if (header.containsKey("Date")) {
-            String protectedDateHeaderValue = (String) header.get("Date");
-            validateHeaderValue("Date", dateHeaderValue, protectedDateHeaderValue);
+        // check FSPIOP-URI is present and matches
+        if(!decodedProtectedHeader.containsKey("FSPIOP-URI")) {
+            throw new IllegalArgumentException("Decoded protected header does not contain required FSPIOP-URI element: " + decodedProtectedHeader);
         }
-
-        // If we have an HTTP fspiop-destination header, it should also be in the protected header, and the values should match exactly
-        String destinationHeaderValue = headers.get("fspiop-destination");
-        if (header.containsKey("FSPIOP-Destination")) {
-            String protectedDestinationHeaderValue = (String) header.get("FSPIOP-Destination");
-            validateHeaderValue("FSPIOP-Destination", destinationHeaderValue, protectedDestinationHeaderValue);
+        if(!headers.containsKey("fspiop-uri")) {
+            throw new IllegalArgumentException("FSPIOP-URI HTTP header not present in request headers: " + headers);
         }
-    }
-
-    private void validateHeaderValue(String headerName, String actualValue, String protectedValue) {
-        if (protectedValue == null) {
-            throw new IllegalArgumentException("Decoded protected header does not contain required " + headerName + " element");
+        if(!decodedProtectedHeader.get("FSPIOP-URI").equals(headers.get("fspiop-uri"))) {
+            throw new IllegalArgumentException("FSPIOP-URI HTTP request header value: " + headers.get("fspiop-uri") + " does not match protected header value: " + decodedProtectedHeader.get("FSPIOP-URI"));
         }
-
-        if (actualValue == null) {
-            throw new IllegalArgumentException(headerName + " HTTP header not present in request headers: " + "");//headers
+        // check FSPIOP-HTTP-Method is present and matches
+        if(!decodedProtectedHeader.containsKey("FSPIOP-HTTP-Method")) {
+            throw new IllegalArgumentException("Decoded protected header does not contain required FSPIOP-HTTP-Method element: " + decodedProtectedHeader);
         }
-
-        if (!actualValue.equals(protectedValue)) {
-            throw new IllegalArgumentException(headerName + " HTTP request header value: " + actualValue + " does not match protected header value: " + protectedValue);
+        if(!headers.containsKey("fspiop-http-method")) {
+            throw new IllegalArgumentException("FSPIOP-HTTP-Method HTTP header not present in request headers: " + headers);
         }
-    }
-
-    private static class SignatureData {
-        private final String protectedHeader;
-        private final String signature;
-
-        private SignatureData(String protectedHeader, String signature) {
-            this.protectedHeader = protectedHeader;
-            this.signature = signature;
+        if(!decodedProtectedHeader.get("FSPIOP-HTTP-Method").equals(headers.get("fspiop-http-method"))) {
+            throw new IllegalArgumentException("FSPIOP-HTTP-Method HTTP request header value: " + headers.get("fspiop-http-method") + " does not match protected header value: " + decodedProtectedHeader.get("FSPIOP-HTTP-Method"));
+        }
+        // check FSPIOP-Source is present and matches
+        if(!decodedProtectedHeader.containsKey("FSPIOP-Source")) {
+            throw new IllegalArgumentException("Decoded protected header does not contain required FSPIOP-Source element: " + decodedProtectedHeader);
+        }
+        if(!headers.containsKey("fspiop-source")) {
+            throw new IllegalArgumentException("FSPIOP-Source HTTP header not present in request headers: " + headers);
+        }
+        if(!decodedProtectedHeader.get("FSPIOP-Source").equals(headers.get("fspiop-source"))) {
+            throw new IllegalArgumentException("FSPIOP-Source HTTP request header value: " + headers.get("fspiop-source") + " does not match protected header value: " + decodedProtectedHeader.get("FSPIOP-Source"));
+        }
+        // if we have a Date field in the protected header it must be present in the HTTP header and the values should match exactly
+        if(decodedProtectedHeader.containsKey("Date") && !headers.containsKey("date")) {
+            throw new IllegalArgumentException("Date header is present in protected header but not in HTTP request: " + headers);
+        }
+        if(decodedProtectedHeader.containsKey("Date") && !headers.get("date").equals(decodedProtectedHeader.get("Date"))) {
+            throw new IllegalArgumentException("HTTP date header: " + headers.get("date") + " does not match protected header Date value: " + decodedProtectedHeader.get("Date"));
+        }
+        // if we have an HTTP fspiop-destination header it should also be in the protected header and the values should match exactly
+        if(headers.containsKey("fspiop-destination") && !decodedProtectedHeader.containsKey("FSPIOP-Destination")) {
+            throw new IllegalArgumentException("HTTP fspiop-destination header is present but is not present in protected header: " + decodedProtectedHeader);
+        }
+        if(decodedProtectedHeader.containsKey("FSPIOP-Destination") && !headers.containsKey("fspiop-destination")) {
+            throw new IllegalArgumentException("FSPIOP-Destination header is present in protected header but not in HTTP request: " + headers);
+        }
+        if(headers.containsKey("fspiop-destination") && !headers.get("fspiop-destination").equals(decodedProtectedHeader.get("FSPIOP-Destination"))) {
+            throw new IllegalArgumentException("HTTP FSPIOP-Destination header: " + headers.get("fspiop-destination") + " does not match protected header FSPIOP-Destination value: " + decodedProtectedHeader.get("FSPIOP-Destination"));
         }
     }
 }

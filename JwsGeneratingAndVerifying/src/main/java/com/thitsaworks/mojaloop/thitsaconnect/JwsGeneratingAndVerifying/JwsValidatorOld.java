@@ -19,8 +19,8 @@ import java.util.logging.Logger;
 @Component
 public class JwsValidatorOld {
 
-    @Value("${jwt.secret}")
-    private String secret;
+//    @Value("${jwt.secret}")
+//    private String secret;
 
     @Autowired
     private RSAKeyProvider rsaKeyProvider;
@@ -32,37 +32,39 @@ public class JwsValidatorOld {
      * Throws if the protected header or signature are not valid
      */
     public boolean validate(String request) throws Exception {
+
         boolean bIsValid = true;
+
         try {
 
-            String validationKeys = secret;
+            PublicKey secret = rsaKeyProvider.readX509PublicKey(
+                    "jwsValidationKey.pem");
+
+            String validationKeys = secret.toString();//secret
 
             String jws = request.replace("Bearer ", "");  //request.getHeader("Authorization").replace("Bearer ", "");
             SignedJWT signedJWT = SignedJWT.parse(jws);
             JWSHeader header = signedJWT.getHeader();
             if (!header.getAlgorithm().equals(SIGNATURE_ALGORITHM)) {
-                bIsValid = false;
                 throw new Exception("Invalid signature algorithm");
             }
-            String keyId = header.getKeyID();
-            if (!header.getKeyID().equals(validationKeys)) {
-                bIsValid = false;
-                throw new Exception("Invalid key ID");
-            }
+
+//            String keyId = header.getKeyID();
+//            if (!header.getKeyID().equals(validationKeys)) {
+//                throw new Exception("Invalid key ID");
+//            }
+
             //String publicKey = validationKeys.get(keyId);
-            PublicKey publicKey = rsaKeyProvider.getPublicKeyRsa(keyId);
+            PublicKey publicKey = secret; //rsaKeyProvider.getPublicKeyRsa(keyId);
             JWSVerifier verifier = new RSASSAVerifier((RSAPublicKey) publicKey);
             if (!signedJWT.verify(verifier)) {
-                bIsValid = false;
                 throw new Exception("Invalid signature");
             }
-            JWTClaimsSet claimsSet = signedJWT.getJWTClaimsSet();
-            if (claimsSet.getExpirationTime().before(new Date())) {
-                bIsValid = false;
-                throw new Exception("Token expired");
-            }
+//            JWTClaimsSet claimsSet = signedJWT.getJWTClaimsSet();
+//            if (claimsSet.getExpirationTime().before(new Date())) {
+//                throw new Exception("Token expired");
+//            }
         } catch (JOSEException e) {
-            bIsValid = false;
             LOGGER.severe("Error validating JWS: " + e.getMessage());
             throw new Exception("Error validating JWS");
         }
